@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#13233f">
+<title>FallSense – smartphone fall detection</title>
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+  :root{--navy:#13233f;--navy2:#1d3257;--ink:#16202e;--muted:#5b6575;--line:#e3e6ec;--bg:#f5f6f8;
+        --orange:#ef8d22;--teal:#1baf7a;--blue:#2a78d6;--red:#e34948;--card:#fff}
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink);background:var(--bg)}
+  header{background:var(--navy);color:#fff;padding:14px 16px 10px;position:sticky;top:0;z-index:5}
+  header h1{margin:0;font-size:20px;letter-spacing:.3px}
+  header .sub{font-size:12px;opacity:.75}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .pill{font-size:11px;font-weight:600;padding:3px 9px;border-radius:99px;background:#ffffff22;color:#fff}
+  .pill.on{background:var(--teal)} .pill.warn{background:var(--orange)} .pill.bad{background:var(--red)}
+  nav{display:flex;background:var(--navy2);overflow-x:auto}
+  nav button{flex:1;background:none;border:0;color:#cfd6e4;padding:10px 6px;font-size:13px;font-weight:600;border-bottom:3px solid transparent;white-space:nowrap}
+  nav button.act{color:#fff;border-bottom-color:var(--orange)}
+  main{padding:12px;max-width:720px;margin:0 auto}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:12px}
+  .card h2{font-size:15px;margin:0 0 8px}
+  .muted{color:var(--muted);font-size:13px}
+  .btn{border:0;border-radius:10px;padding:12px 16px;font-size:15px;font-weight:700;background:var(--navy);color:#fff}
+  .btn.big{width:100%;padding:16px;font-size:17px}
+  .btn.orange{background:var(--orange)} .btn.teal{background:var(--teal)} .btn.red{background:var(--red)}
+  .btn.ghost{background:#eef1f6;color:var(--ink)}
+  .btn:disabled{opacity:.45}
+  canvas{width:100%;height:170px;display:block;background:#fbfcfd;border:1px solid var(--line);border-radius:8px}
+  .states{display:flex;gap:4px;flex-wrap:wrap;margin:8px 0}
+  .st{font-size:11px;padding:3px 7px;border-radius:6px;background:#eef1f6;color:var(--muted);font-weight:600}
+  .st.act{background:var(--navy);color:#fff}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  td,th{padding:4px 6px;border-bottom:1px solid var(--line);text-align:left}
+  td.num{text-align:right;font-variant-numeric:tabular-nums}
+  .tag{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;color:#fff}
+  .t-ADL{background:var(--teal)} .t-DROP{background:var(--blue)} .t-FALL{background:var(--orange)}
+  .t-ALARM{background:var(--red)}
+  label{display:block;font-size:13px;color:var(--muted);margin:8px 0 3px}
+  input,select{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;font-size:15px;background:#fff}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .hidden{display:none!important}
+  #overlay{position:fixed;inset:0;background:rgba(19,35,63,.96);color:#fff;z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center}
+  #overlay h2{font-size:28px;margin:0 0 6px}
+  #ovCount{font-size:88px;font-weight:800;color:var(--orange);margin:10px 0}
+  #overlay .btn{margin-top:14px;min-width:240px}
+  .log{max-height:240px;overflow:auto;font-size:13px}
+  .log div{padding:6px 0;border-bottom:1px solid var(--line)}
+  .kv{display:grid;grid-template-columns:1fr auto;gap:2px 10px;font-size:13px}
+  .kv span:nth-child(even){font-variant-numeric:tabular-nums;text-align:right}
+  .note{font-size:12px;background:#fff7ec;border:1px solid #f6d8b0;border-radius:8px;padding:8px 10px;color:#6b4a14}
+</style>
+</head>
+<body>
+<header>
+  <div class="row" style="justify-content:space-between">
+    <div><h1>FallSense</h1><div class="sub">Smartphone fall detection · DH803 Wearable Health Technologies</div></div>
+    <div class="row"><span id="pillState" class="pill">IDLE</span><span id="pillRate" class="pill">– Hz</span></div>
+  </div>
+</header>
+<nav id="tabs">
+  <button data-t="mon" class="act">Monitor</button>
+  <button data-t="cal">Calibrate</button>
+  <button data-t="rec">Record data</button>
+  <button data-t="demo">Demo replay</button>
+  <button data-t="set">Settings</button>
+</nav>
+<main>
+<!-- ============================ MONITOR -->
+<section id="t-mon">
+  <div class="card">
+    <button id="btnStart" class="btn big orange">Start monitoring</button>
+    <div class="muted" style="margin-top:8px">Keep the phone in the same place you chose in Settings (trouser pocket, waist belt or chest pocket). Keep this screen open: browsers pause sensors when the screen is off.</div>
+  </div>
+  <div class="card">
+    <h2>Live signal – SMV = √(ax²+ay²+az²)</h2>
+    <canvas id="cv" width="700" height="200"></canvas>
+    <div class="muted">Orange dashed: impact trigger (1.9 g) · blue dashed: free-fall level (0.2 g) · 10 s window, 50 Hz uniform after resampling</div>
+    <div class="states" id="states"></div>
+  </div>
+  <div class="card">
+    <h2>Last event</h2>
+    <div id="lastEv" class="muted">No event yet.</div>
+  </div>
+  <div class="card">
+    <h2>Event log</h2>
+    <div id="log" class="log muted">–</div>
+  </div>
+</section>
+
+<!-- ============================ CALIBRATE -->
+<section id="t-cal" class="hidden">
+  <div class="card">
+    <h2>1 · Blank test → noise floor and LOD</h2>
+    <div class="muted">Put the phone face-up on a firm table and do not touch it for 30 s. This is the "blank" of Class 15: LOD = mean<sub>blank</sub> + 3.3·SD<sub>blank</sub> of the post-impact motion metric. A phone lying on the floor reads below this LOD; a person lying on the floor (breathing, small movements) reads above it.</div>
+    <button id="btnBlank" class="btn big" style="margin-top:10px">Start 30 s blank test</button>
+    <div id="blankRes" style="margin-top:10px"></div>
+  </div>
+  <div class="card">
+    <h2>2 · Six-position test → offset (bias) and sensitivity (gain)</h2>
+    <div class="muted">Hold the phone still with each axis pointing up, then down (6 × 5 s). Accuracy is checked against ±1 g.</div>
+    <button id="btnSix" class="btn big" style="margin-top:10px">Start six-position test</button>
+    <div id="sixRes" style="margin-top:10px"></div>
+  </div>
+</section>
+
+<!-- ============================ RECORD -->
+<section id="t-rec" class="hidden">
+  <div class="card">
+    <h2>Labelled recording (data collection protocol)</h2>
+    <div class="grid2">
+      <div><label>Subject ID</label><input id="rSubj" value="S01"></div>
+      <div><label>Trial no.</label><input id="rTrial" type="number" value="1"></div>
+    </div>
+    <label>Activity / scenario</label>
+    <select id="rLabel"></select>
+    <label>Phone placement</label>
+    <select id="rPlace"><option>pocket</option><option>waist</option><option>chest</option><option>hand</option><option>free (phone only)</option></select>
+    <div class="note" style="margin-top:10px">Safety: simulated falls only onto a ≥10 cm crash mat, supervised, by the team members only. Phone drops only onto a mat or carpet, or with a case on.</div>
+    <button id="btnRec" class="btn big teal" style="margin-top:10px">Start recording (3 s countdown)</button>
+    <div id="recInfo" class="muted" style="margin-top:8px"></div>
+  </div>
+  <div class="card">
+    <h2>Recordings in this session</h2>
+    <div id="recList" class="muted">None yet. Each recording downloads as a CSV; the Python pipeline reads it with <code>fallsense.io.load_app_csv</code>.</div>
+  </div>
+</section>
+
+<!-- ============================ DEMO -->
+<section id="t-demo" class="hidden">
+  <div class="card">
+    <h2>Replay example recordings through the detector</h2>
+    <div class="muted">For presentations: no sensor needed. Replays at 5× speed through exactly the same algorithm as live monitoring (simulated signals from the project's verification set).</div>
+    <div id="demoBtns" style="display:grid;gap:8px;margin-top:10px"></div>
+  </div>
+</section>
+
+<!-- ============================ SETTINGS -->
+<section id="t-set" class="hidden">
+  <div class="card">
+    <h2>Alert</h2>
+    <label>Your name (in the alert message)</label><input id="sName" placeholder="e.g. Allan">
+    <label>Emergency contact phone (with country code)</label><input id="sPhone" placeholder="+91XXXXXXXXXX">
+    <div class="grid2">
+      <div><label>"Are you OK?" countdown (s)</label><input id="sCount" type="number" value="20"></div>
+      <div><label>Share location in alert</label><select id="sLoc"><option value="1">Yes</option><option value="0">No</option></select></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Detector</h2>
+    <label>Phone placement while monitoring</label>
+    <select id="sPlace"><option>waist</option><option>pocket</option><option>chest</option></select>
+    <div class="grid2">
+      <div><label>Time to get up, T_REC (s)</label><input id="sTrec" type="number" value="30"></div>
+      <div><label>Time to pick phone up, T_PICK (s)</label><input id="sTpick" type="number" value="30"></div>
+      <div><label>Impact trigger (g)</label><input id="sTrig" type="number" step="0.1" value="1.9"></div>
+      <div><label>Motion LOD (g)</label><input id="sLod" type="number" step="0.0001" value="0.002"></div>
+    </div>
+    <button id="btnSave" class="btn" style="margin-top:12px">Save settings</button>
+    <div class="muted" style="margin-top:8px">Settings are kept in this browser only. Recorded data never leave the phone unless you download them.</div>
+  </div>
+  <div class="card muted">FallSense is an academic prototype (DH803, IIT Bombay). It is not a medical device and must not replace a certified personal emergency response system.</div>
+</section>
+</main>
+
+<div id="overlay" class="hidden">
+  <div id="ovTitle" style="font-size:14px;letter-spacing:1px;opacity:.8">POSSIBLE FALL DETECTED</div>
+  <h2 id="ovQ">Are you OK?</h2>
+  <div id="ovMsg" style="opacity:.85;max-width:420px"></div>
+  <div id="ovCount">20</div>
+  <button id="ovOk" class="btn big teal">I'm OK – cancel</button>
+  <button id="ovHelp" class="btn big red">Send help now</button>
+  <div id="ovLinks" style="margin-top:16px"></div>
+</div>
+
+<script src="fallsense-core.js"></script>
+<script src="demo-traces.js"></script>
+<script>
+"use strict";
+const C = window.FallSenseCore;
+const $ = id => document.getElementById(id);
+const FS = 50;
+// ---------------------------------------------------------------- settings
+const DEF = {name:"", phone:"", count:20, loc:"1", place:"waist", trec:30, tpick:30, trig:1.9, lod:0.002};
+let S = Object.assign({}, DEF);
+try { Object.assign(S, JSON.parse(localStorage.getItem("fallsense.settings") || "{}")); } catch (e) {}
+function fillSettings(){ $("sName").value=S.name; $("sPhone").value=S.phone; $("sCount").value=S.count; $("sLoc").value=S.loc;
+  $("sPlace").value=S.place; $("sTrec").value=S.trec; $("sTpick").value=S.tpick; $("sTrig").value=S.trig; $("sLod").value=S.lod; }
+fillSettings();
+$("btnSave").onclick = () => {
+  S = {name:$("sName").value, phone:$("sPhone").value.trim(), count:+$("sCount").value||20, loc:$("sLoc").value,
+       place:$("sPlace").value, trec:+$("sTrec").value||30, tpick:+$("sTpick").value||30, trig:+$("sTrig").value||1.9, lod:+$("sLod").value||0.002};
+  try { localStorage.setItem("fallsense.settings", JSON.stringify(S)); } catch (e) {}
+  $("btnSave").textContent = "Saved ✓"; setTimeout(()=>$("btnSave").textContent="Save settings",1200);
+};
+function cfg(){ return {T_REC:S.trec, T_PICK:S.tpick, TRIG_G:S.trig, LOD_MOTION:S.lod}; }
+
+// ---------------------------------------------------------------- tabs
+document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("#tabs button").forEach(x=>x.classList.toggle("act", x===b));
+  ["mon","cal","rec","demo","set"].forEach(t => $("t-"+t).classList.toggle("hidden", t!==b.dataset.t));
+});
+
+// ---------------------------------------------------------------- sensor plumbing
+let listeners = [];           // functions(tMs, acc_ms2[3], gyro_dps[3])
+let sensorOn = false, rateCount = 0, rateT0 = performance.now();
+async function ensureSensor(){
+  if (sensorOn) return true;
+  if (typeof DeviceMotionEvent === "undefined") { alert("This browser exposes no motion sensors. Open the page on a phone (Chrome on Android or Safari on iPhone) over https."); return false; }
+  if (typeof DeviceMotionEvent.requestPermission === "function") {
+    try { if (await DeviceMotionEvent.requestPermission() !== "granted") { alert("Motion permission denied."); return false; } }
+    catch (e) { alert("Motion permission error: " + e); return false; }
+  }
+  window.addEventListener("devicemotion", ev => {
+    const a = ev.accelerationIncludingGravity; if (!a || a.x === null) return;
+    const r = ev.rotationRate || {};
+    const t = performance.now();
+    rateCount++;
+    const acc = [a.x, a.y, a.z], gyr = [r.alpha ?? NaN, r.beta ?? NaN, r.gamma ?? NaN];
+    for (const f of listeners) f(t, acc, gyr);
+  });
+  sensorOn = true;
+  setInterval(() => { const now = performance.now(); const hz = rateCount*1000/(now-rateT0); rateCount=0; rateT0=now;
+    $("pillRate").textContent = hz ? hz.toFixed(0)+" Hz" : "– Hz"; }, 2000);
+  return true;
+}
+let wakeLock = null;
+async function keepAwake(on){ try { if (on && "wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen"); else if (wakeLock) { await wakeLock.release(); wakeLock=null; } } catch(e){} }
+
+// ---------------------------------------------------------------- chart
+const cv = $("cv"), cx = cv.getContext("2d");
+let ring = [];
+function draw(){
+  const W = cv.width, H = cv.height, ymax = 4.5;
+  cx.clearRect(0,0,W,H);
+  const y = v => H - 18 - (Math.min(v,ymax)/ymax)*(H-28);
+  cx.font = "11px system-ui"; cx.fillStyle = "#5b6575";
+  cx.strokeStyle = "#e3e6ec"; cx.lineWidth = 1;
+  for (const g of [0,1,2,3,4]) { cx.beginPath(); cx.moveTo(30,y(g)); cx.lineTo(W,y(g)); cx.stroke(); cx.fillText(g+" g", 2, y(g)+4); }
+  cx.setLineDash([6,4]); cx.lineWidth = 1.5;
+  cx.strokeStyle = "#ef8d22"; cx.beginPath(); cx.moveTo(30,y(S.trig)); cx.lineTo(W,y(S.trig)); cx.stroke();
+  cx.strokeStyle = "#2a78d6"; cx.beginPath(); cx.moveTo(30,y(0.2)); cx.lineTo(W,y(0.2)); cx.stroke();
+  cx.setLineDash([]);
+  cx.strokeStyle = "#13233f"; cx.lineWidth = 2; cx.beginPath();
+  const n = 500; ring.forEach((v,i) => { const X = 30 + (W-30)*(i+n-ring.length)/n; i ? cx.lineTo(X,y(v)) : cx.moveTo(X,y(v)); });
+  cx.stroke();
+}
+setInterval(draw, 100);
+const STATES = ["IDLE","PEAK","WAIT","MON_FALL","MON_DROP","ALARMED"];
+$("states").innerHTML = STATES.map(s=>`<span class="st" id="st-${s}">${s}</span>`).join("");
+function showState(s){ STATES.forEach(x=>$("st-"+x).classList.toggle("act", x===s)); }
+
+// ---------------------------------------------------------------- detector wiring
+let det = null, rs = null, demoMode = false;
+function newDetector(isDemo){
+  det = new C.Detector(cfg()); demoMode = !!isDemo;
+  det.onDecision = ev => { showEvent(ev); logEv(ev, "decision"); };
+  det.onOutcome = ev => { showEvent(ev); logEv(ev, "outcome");
+    if (ev.outcome === "LONG_LIE_ALARM") startAlarm("No movement or getting up for " + S.trec + " s after a fall.", "fall");
+    if (ev.outcome === "UNATTENDED_DROP_CHECKIN") startAlarm("The phone was dropped and has not been picked up for " + S.tpick + " s.", "drop"); };
+  rs = new C.Resampler(FS, (a) => { det.push(a, null); ring.push(C.smv3(a)); if (ring.length>500) ring.shift(); showState(det.state); });
+}
+function lbl(ev){
+  const o = ev.outcome || "";
+  if (o.includes("ALARM") || o.includes("CHECKIN")) return ["ALARM", o];
+  return [ev.cls, o || "monitoring…"];
+}
+function showEvent(ev){
+  const f = ev.feat, [t, o] = lbl(ev);
+  const rows = [["Peak SMV", f.peak.toFixed(2)+" g"],["Free-fall < 0.2 g", (f.ff_dur*1000).toFixed(0)+" ms"],
+    ["Min SMV before impact", f.min_pre.toFixed(2)+" g"],["Velocity estimate", f.v_pre.toFixed(2)+" m/s"],
+    ["Bounce free-fall", f.bounce_ff ? "yes":"no"],["Post-impact motion (1.2–3 s)", (f.still_early*1000).toFixed(1)+" mg"],
+    ["Motion LOD", (S.lod*1000).toFixed(1)+" mg"],["Posture change Δθ", f.dtheta.toFixed(0)+"°"],
+    ["Active after impact", (f.active_frac*100).toFixed(0)+" %"],["Drop / fall evidence", ev.evidence.drop_score+" / "+ev.evidence.fall_score]];
+  $("lastEv").innerHTML = `<div class="row" style="margin-bottom:6px"><span class="tag t-${t}">${ev.cls}</span><b>${o}</b></div>
+    <div class="kv">${rows.map(r=>`<span>${r[0]}</span><span>${r[1]}</span>`).join("")}</div>`;
+}
+function logEv(ev, kind){
+  const time = new Date().toLocaleTimeString();
+  const d = document.createElement("div");
+  d.innerHTML = `<b>${time}</b> · ${demoMode?"[demo] ":""}${kind}: <span class="tag t-${lbl(ev)[0]}">${ev.cls}</span> ${ev.outcome||""}`;
+  const L = $("log"); if (L.textContent==="–") L.textContent=""; L.prepend(d);
+}
+
+let monitoring = false;
+const monListener = (t, acc) => { if (monitoring) rs.push(t, acc.map(v=>v/C.G)); };
+listeners.push(monListener);
+$("btnStart").onclick = async () => {
+  if (!monitoring) {
+    if (!(await ensureSensor())) return;
+    newDetector(false); monitoring = true; keepAwake(true);
+    $("btnStart").textContent = "Stop monitoring"; $("btnStart").classList.replace("orange","red");
+    $("pillState").textContent = "MONITORING"; $("pillState").className = "pill on";
+  } else {
+    monitoring = false; keepAwake(false);
+    $("btnStart").textContent = "Start monitoring"; $("btnStart").classList.replace("red","orange");
+    $("pillState").textContent = "IDLE"; $("pillState").className = "pill";
+  }
+};
+
+// ---------------------------------------------------------------- alarm
+let alarmTimer = null, audio = null;
+function beep(on){
+  try {
+    if (on) { audio = audio || new (window.AudioContext||window.webkitAudioContext)();
+      const o = audio.createOscillator(), g = audio.createGain(); o.frequency.value = 880; g.gain.value = 0.25;
+      o.connect(g); g.connect(audio.destination); o.start(); o.stop(audio.currentTime + 0.25); }
+  } catch(e){}
+}
+function startAlarm(msg, kind){
+  $("overlay").classList.remove("hidden");
+  $("ovTitle").textContent = (demoMode ? "DEMO · " : "") + (kind==="fall" ? "POSSIBLE FALL – NO RECOVERY" : "PHONE DROPPED – NOT PICKED UP");
+  $("ovMsg").textContent = msg; $("ovLinks").innerHTML = "";
+  let n = S.count; $("ovCount").textContent = n;
+  clearInterval(alarmTimer);
+  alarmTimer = setInterval(() => { n--; $("ovCount").textContent = n; beep(true); if (navigator.vibrate) navigator.vibrate(300);
+    if (n <= 0) { clearInterval(alarmTimer); sendHelp(kind); } }, 1000);
+}
+function closeAlarm(){ clearInterval(alarmTimer); $("overlay").classList.add("hidden"); if (det) { det.resetAfterAlarm(); showState(det.state); } }
+$("ovOk").onclick = () => { logEv({cls:"USER", outcome:"cancelled by user ('I'm OK')"}, "alarm"); closeAlarm(); };
+$("ovHelp").onclick = () => { clearInterval(alarmTimer); sendHelp("manual"); };
+function sendHelp(kind){
+  $("ovCount").textContent = "!";
+  const base = `FallSense alert: ${S.name||"the user"} may have fallen and is not responding (${new Date().toLocaleString()}).`;
+  const finish = (loc) => {
+    const body = encodeURIComponent(base + (loc ? " Location: " + loc : ""));
+    if (demoMode || !S.phone) {
+      $("ovLinks").innerHTML = `<div class="muted" style="color:#cfd6e4">${demoMode?"Demo mode – no message sent.":"Set an emergency contact in Settings."}<br>Message: ${decodeURIComponent(body)}</div>
+        <button class="btn ghost" style="margin-top:10px" onclick="closeAlarm()">Close</button>`;
+      return;
+    }
+    $("ovLinks").innerHTML = `<a class="btn big orange" href="sms:${S.phone}?&body=${body}">Send SMS to ${S.phone}</a><br><br>
+      <a class="btn big red" href="tel:${S.phone}">Call ${S.phone}</a><br><button class="btn ghost" style="margin-top:10px" onclick="closeAlarm()">Close</button>`;
+    location.href = `sms:${S.phone}?&body=${body}`;   // opens the SMS app with the message filled in
+  };
+  logEv({cls:"ALERT", outcome:"help requested"}, "alarm");
+  if (S.loc === "1" && navigator.geolocation && !demoMode) {
+    navigator.geolocation.getCurrentPosition(p => finish(`https://maps.google.com/?q=${p.coords.latitude.toFixed(5)},${p.coords.longitude.toFixed(5)}`),
+                                             () => finish(null), {timeout:8000});
+  } else finish(null);
+}
+
+// ---------------------------------------------------------------- calibration
+function collect(seconds, onDone, onTick){
+  const rows = [], raw = [];
+  const r = new C.Resampler(FS, a => rows.push(a));
+  const f = (t, acc) => { raw.push(t); r.push(t, acc.map(v=>v/C.G)); };
+  listeners.push(f);
+  let left = seconds; onTick && onTick(left);
+  const iv = setInterval(() => { left--; onTick && onTick(left); if (left <= 0) { clearInterval(iv); listeners = listeners.filter(x=>x!==f); onDone(rows, raw); } }, 1000);
+}
+function stats(rows){ const m=[0,0,0], v=[0,0,0]; rows.forEach(r=>{for(let k=0;k<3;k++)m[k]+=r[k]/rows.length;});
+  rows.forEach(r=>{for(let k=0;k<3;k++)v[k]+=(r[k]-m[k])**2/rows.length;}); return {m, sd:v.map(Math.sqrt)}; }
+function timing(raw){ const d=[]; for(let i=1;i<raw.length;i++) d.push(raw[i]-raw[i-1]); const mu=d.reduce((a,b)=>a+b,0)/d.length;
+  const sd=Math.sqrt(d.reduce((a,b)=>a+(b-mu)**2,0)/d.length); return {rate:1000/mu, jitter:sd, gap:Math.max(...d)}; }
+$("btnBlank").onclick = async () => {
+  if (!(await ensureSensor())) return;
+  $("btnBlank").disabled = true;
+  collect(30, (rows, raw) => {
+    $("btnBlank").disabled = false; $("btnBlank").textContent = "Repeat blank test";
+    const st = stats(rows), L = C.lodFromBlank(rows, FS), tm = timing(raw);
+    const g = Math.hypot(...st.m);
+    const res = {mean_g: st.m, sd_mg: st.sd.map(x=>x*1000), gravity_g: g, lod_g: L.lod, mean_blank_g: L.mean_blank, sd_blank_g: L.sd_blank,
+                 event_rate_hz: tm.rate, jitter_ms: tm.jitter, max_gap_ms: tm.gap};
+    $("blankRes").innerHTML = `<table>
+      <tr><th>Specification (Class 15–17, 22)</th><th>Value</th></tr>
+      <tr><td>Sensor event rate (browser)</td><td class="num">${tm.rate.toFixed(1)} Hz</td></tr>
+      <tr><td>Interval jitter SD / largest gap</td><td class="num">${tm.jitter.toFixed(2)} / ${tm.gap.toFixed(0)} ms</td></tr>
+      <tr><td>Gravity magnitude (should be 1.000 g)</td><td class="num">${g.toFixed(3)} g</td></tr>
+      <tr><td>Noise SD x / y / z</td><td class="num">${res.sd_mg.map(x=>x.toFixed(2)).join(" / ")} mg</td></tr>
+      <tr><td>Blank motion metric: mean ± SD</td><td class="num">${(L.mean_blank*1000).toFixed(2)} ± ${(L.sd_blank*1000).toFixed(2)} mg</td></tr>
+      <tr><td><b>LOD = mean + 3.3·SD</b></td><td class="num"><b>${(L.lod*1000).toFixed(2)} mg</b></td></tr></table>
+      <button class="btn teal" id="btnApplyLod" style="margin-top:8px">Use this LOD</button>
+      <button class="btn ghost" id="btnDlBlank" style="margin-top:8px">Download result</button>`;
+    $("btnApplyLod").onclick = () => { S.lod = +Math.max(L.lod, 0.0008).toFixed(5); $("sLod").value = S.lod; $("btnSave").click(); $("btnApplyLod").textContent = "Applied ✓"; };
+    $("btnDlBlank").onclick = () => download("fallsense_blank_test.json", JSON.stringify(res, null, 1));
+  }, left => $("btnBlank").textContent = `Keep still… ${left} s`);
+};
+$("btnSix").onclick = async () => {
+  if (!(await ensureSensor())) return;
+  const steps = ["+x (right edge up)","-x (left edge up)","+y (top edge up)","-y (bottom edge up)","+z (screen up)","-z (screen down)"];
+  const means = {}; let k = 0;
+  $("btnSix").disabled = true;
+  const next = () => {
+    if (k >= steps.length) {
+      $("btnSix").disabled = false; $("btnSix").textContent = "Repeat six-position test";
+      // browsers differ in sign convention; use |reading| on the axis that points up/down
+      const out = ["x","y","z"].map((ax,i) => { const up = means["+"+ax][i], dn = means["-"+ax][i];
+        return {ax, bias_mg: (up+dn)/2*1000, gain: Math.abs(up-dn)/2}; });
+      $("sixRes").innerHTML = `<table><tr><th>Axis</th><th>Offset (bias)</th><th>Sensitivity (gain)</th><th>Gain error</th></tr>` +
+        out.map(o=>`<tr><td>${o.ax}</td><td class="num">${o.bias_mg.toFixed(1)} mg</td><td class="num">${o.gain.toFixed(4)}</td><td class="num">${((o.gain-1)*100).toFixed(2)} %</td></tr>`).join("") + `</table>`;
+      return;
+    }
+    $("btnSix").textContent = `Position ${k+1}/6: ${steps[k]} – get ready…`;
+    setTimeout(() => collect(5, rows => { means[steps[k].slice(0,2)] = stats(rows).m; k++; next(); },
+      left => $("btnSix").textContent = `Hold ${steps[k]} still… ${left} s`), 3000);
+  };
+  next();
+};
+
+// ---------------------------------------------------------------- recorder
+const LABELS = ["ADL: walk","ADL: jog","ADL: stairs","ADL: sit normal","ADL: sit hard","ADL: sit low chair hard","ADL: lie on bed","ADL: jump",
+ "ADL: bend & pick up","ADL: stumble & recover","DROP: from hand onto floor","DROP: from hand onto carpet","DROP: from table","DROP: from pocket while sitting",
+ "DROP: toss onto bed","DROP: drop then pick up","FALL_REC: forward + get up","FALL_REC: backward + get up","FALL_REC: sideways + get up",
+ "FALL_REC: trip while walking + get up","FALL_LL: forward + lie still","FALL_LL: backward + lie still","FALL_LL: sideways + lie still",
+ "FALL_LL: collapse (knees buckle) + lie still","FALL_LL: slide off chair + lie still","STATIC: blank (phone on table)"];
+$("rLabel").innerHTML = LABELS.map(l=>`<option>${l}</option>`).join("");
+let recording = false, recRows = [], recT0 = 0, recCount = 0;
+listeners.push((t, acc, gyr) => { if (recording) recRows.push([t - recT0, ...acc, ...gyr]); });
+$("btnRec").onclick = async () => {
+  if (!(await ensureSensor())) return;
+  if (!recording) {
+    let n = 3; $("btnRec").disabled = true;
+    const iv = setInterval(() => { $("btnRec").textContent = `Starting in ${n}…`; beep(true); n--;
+      if (n < 0) { clearInterval(iv); recRows = []; recT0 = performance.now(); recording = true; keepAwake(true);
+        $("btnRec").disabled = false; $("btnRec").textContent = "Stop recording"; $("btnRec").classList.replace("teal","red"); } }, 1000);
+  } else {
+    recording = false; keepAwake(false);
+    $("btnRec").textContent = "Start recording (3 s countdown)"; $("btnRec").classList.replace("red","teal");
+    const meta = {subject:$("rSubj").value, trial:$("rTrial").value, label:$("rLabel").value, placement:$("rPlace").value,
+                  ua:navigator.userAgent.replace(/,/g," "), date:new Date().toISOString()};
+    // run the detector offline on the recording
+    const d = new C.Detector(cfg()); const r = new C.Resampler(FS, a => d.push(a, null));
+    recRows.forEach(x => r.push(x[0], [x[1]/C.G, x[2]/C.G, x[3]/C.G])); const evs = d.finish();
+    const res = evs.length ? evs.map(e=>e.cls+"→"+e.outcome).join(", ") : "no event";
+    const csv = Object.entries(meta).map(([k,v])=>`# ${k}=${v}`).join("\n") + "\nt_ms,ax,ay,az,gx,gy,gz\n" +
+      recRows.map(x => [x[0].toFixed(1), ...x.slice(1).map(v => (v===null||isNaN(v)) ? "" : (+v).toFixed(5))].join(",")).join("\n");
+    const tag = meta.label.split(":")[0];
+    const fname = `${meta.subject}_${meta.label.replace(/[^A-Za-z0-9]+/g,"-")}_${meta.placement.split(" ")[0]}_T${meta.trial}.csv`;
+    download(fname, csv);
+    recCount++;
+    const L = $("recList"); if (recCount===1) L.innerHTML = "";
+    const div = document.createElement("div");
+    div.innerHTML = `<b>${fname}</b><br><span class="muted">${(recRows.length/((recRows.at(-1)?.[0]||1)/1000)).toFixed(0)} Hz · ${(recRows.at(-1)?.[0]/1000||0).toFixed(1)} s · detector: ${res}</span>`;
+    L.prepend(div);
+    $("recInfo").textContent = `Saved ${fname}. Truth: ${tag}. Detector said: ${res}.`;
+    $("rTrial").value = (+$("rTrial").value || 0) + 1;
+  }
+};
+function download(name, text){
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], {type:"text/csv"}));
+  a.download = name; document.body.appendChild(a); a.click(); a.remove();
+}
+
+// ---------------------------------------------------------------- demo replay
+(window.FALLSENSE_DEMO || []).forEach(tr => {
+  const b = document.createElement("button"); b.className = "btn ghost"; b.style.textAlign = "left";
+  b.textContent = "▶  " + tr.title; b.onclick = () => replay(tr); $("demoBtns").appendChild(b);
+});
+let replayIv = null;
+function replay(tr){
+  clearInterval(replayIv); monitoring = false; ring = [];
+  document.querySelector('#tabs button[data-t="mon"]').click();
+  newDetector(true); $("pillState").textContent = "DEMO"; $("pillState").className = "pill warn";
+  let i = 0;
+  replayIv = setInterval(() => {
+    for (let k = 0; k < 5 && i < tr.A.length; k++, i++) {
+      if (det.state === "ALARMED") break;
+      det.push(tr.A[i], null); ring.push(C.smv3(tr.A[i])); if (ring.length > 500) ring.shift(); showState(det.state);
+    }
+    if (i >= tr.A.length || det.state === "ALARMED") { clearInterval(replayIv); det.finish();
+      if (!det.events.length) $("lastEv").innerHTML = '<span class="tag t-ADL">ADL</span> no event triggered'; }
+  }, 20);
+}
+if ("serviceWorker" in navigator && location.protocol === "https:") { navigator.serviceWorker.register("sw.js").catch(()=>{}); }
+showState("IDLE");
+</script>
+</body>
+</html>
