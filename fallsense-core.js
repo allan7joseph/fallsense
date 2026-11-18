@@ -9,7 +9,7 @@
   const CFG = {
     FS: 50.0, TRIG_G: 1.9, PEAK_S: 0.5, POST_S: 6.0, FF_G: 0.2, FF_DROP_S: 0.22,
     LOD_MOTION: 0.002, TILT_FALL_DEG: 40.0, VEL_FALL: 1.3, ACTIVE_FRAC: 0.35,
-    T_REC: 30.0, T_PICK: 30.0, UPRIGHT_DEG: 35.0,
+    T_REC: 30.0, T_PICK: 30.0, UPRIGHT_DEG: 35.0, RULES: "simple",
   };
 
   // ------------------------------------------------------------------ helpers
@@ -94,7 +94,17 @@
     return f;
   }
 
+  // Simplified decision: three questions, first yes wins (see classify_simple in detector.py).
+  function classifySimple(f, cfg) {
+    if (f.ff_dur >= cfg.FF_DROP_S && (f.bounce_ff > 0 || f.still_early < cfg.LOD_MOTION ||
+        f.imp_width <= 1.0 / cfg.FS + 1e-9)) return ["DROP", {}];                       // Q1 dropped phone
+    if (f.peak >= 2.5 && f.min_pre < 0.6 && f.dtheta >= cfg.TILT_FALL_DEG &&
+        f.active_frac < cfg.ACTIVE_FRAC) return ["FALL", {}];                           // Q2 fall
+    return ["ADL", {}];                                                                  // Q3 silence
+  }
+
   function classifyRules(f, cfg) {
+    if (cfg.RULES !== "full") return classifySimple(f, cfg);
     let drop = 0;
     drop += f.ff_dur >= cfg.FF_DROP_S ? 2 : 0;
     drop += f.bounce_ff > 0 ? 2 : 0;
@@ -227,7 +237,7 @@
     return { mean_blank: m, sd_blank: sd, lod: m + k * sd, n_windows: vals.length };
   }
 
-  const api = { CFG, G, Detector, Resampler, eventFeatures, classifyRules, motionRSS, lodFromBlank, smv3 };
+  const api = { CFG, G, Detector, Resampler, eventFeatures, classifyRules, classifySimple, motionRSS, lodFromBlank, smv3 };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.FallSenseCore = api;
 })(typeof window !== "undefined" ? window : globalThis);
